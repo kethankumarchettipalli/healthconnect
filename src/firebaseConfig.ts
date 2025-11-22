@@ -4,14 +4,13 @@ import { getFirestore } from "firebase/firestore";
 
 // Your project's Firebase configuration
 const firebaseConfig = {
-  apiKey: "AIzaSyBZOmK0pgr8y49YTIusnVOREFjzcDdv2Ag",
-  authDomain: "healthconnect-6b838.firebaseapp.com",
-  projectId: "healthconnect-6b838",
-  storageBucket: "healthconnect-6b838.appspot.com",
-  messagingSenderId: "996319029824",
-  appId: "1:996319029824:web:f4c2a6d344966a6efacda5"
+  apiKey: import.meta.env.VITE_FIREBASE_API_KEY,
+  authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN,
+  projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID,
+  storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET,
+  messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID,
+  appId: import.meta.env.VITE_FIREBASE_APP_ID
 };
-
 
 // Initialize Firebase
 const app = initializeApp(firebaseConfig);
