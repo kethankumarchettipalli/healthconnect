@@ -6,6 +6,7 @@ import { collection, getDocs } from 'firebase/firestore';
 import { db } from '@/firebaseConfig';
 import { Doctor, SearchFilters } from '@/types';
 import LoadingSpinner from '@/components/UI/LoadingSpinner';
+import { getAuth, onAuthStateChanged } from 'firebase/auth';
 
 const DoctorsList: React.FC = () => {
   const [allDoctors, setAllDoctors] = useState<Doctor[]>([]);
@@ -13,21 +14,37 @@ const DoctorsList: React.FC = () => {
   const [showFilters, setShowFilters] = useState(false);
   const [sortBy, setSortBy] = useState<'rating' | 'experience' | 'fee'>('rating');
   const [isLoading, setIsLoading] = useState(true);
+  const [userLoaded, setUserLoaded] = useState(false);
 
   const [searchParams, setSearchParams] = useSearchParams();
-  const queryFromUrl = searchParams.get('query') || '';   // ✅ get query from URL
+  const queryFromUrl = searchParams.get('query') || '';
   const specialtyFromUrl = searchParams.get('specialty');
-
   const [searchQuery, setSearchQuery] = useState(queryFromUrl);
 
+  // ✅ Wait for Firebase user authentication before reading Firestore
   useEffect(() => {
-    // ✅ Keep searchQuery in sync when URL query changes
+    const auth = getAuth();
+    const unsubscribe = onAuthStateChanged(auth, (user) => {
+      if (user) {
+        console.log("User authenticated:", user.email);
+      } else {
+        console.warn("No user signed in — Firestore access may fail");
+      }
+      setUserLoaded(true);
+    });
+
+    return () => unsubscribe();
+  }, []);
+
+  useEffect(() => {
+    if (!userLoaded) return; // Wait for user check first
+
     if (queryFromUrl !== searchQuery) {
       setSearchQuery(queryFromUrl);
     }
 
     if (specialtyFromUrl) {
-      setFilters(prevFilters => ({ ...prevFilters, specialty: specialtyFromUrl }));
+      setFilters(prev => ({ ...prev, specialty: specialtyFromUrl }));
     }
 
     const fetchDoctors = async () => {
@@ -52,15 +69,18 @@ const DoctorsList: React.FC = () => {
           } as Doctor;
         });
         setAllDoctors(doctorsData);
-      } catch (error) {
-        console.error("Error fetching doctors:", error);
+      } catch (error: any) {
+        console.error("Error fetching doctors:", error.code, error.message);
+        if (error.code === "permission-denied") {
+          alert("Firestore permissions error — check your security rules or ensure you're signed in.");
+        }
       } finally {
         setIsLoading(false);
       }
     };
 
     fetchDoctors();
-  }, [queryFromUrl, specialtyFromUrl]);  // ✅ depend on query param
+  }, [queryFromUrl, specialtyFromUrl, userLoaded]);
 
   const filteredDoctors = useMemo(() => {
     let result = [...allDoctors];
@@ -72,7 +92,7 @@ const DoctorsList: React.FC = () => {
         doctor.specialty.toLowerCase().includes(query)
       );
     }
-    
+
     if (filters.specialty) result = result.filter(d => d.specialty === filters.specialty);
     if (filters.maxFee) result = result.filter(d => d.consultationFee <= filters.maxFee!);
     if (filters.minRating) result = result.filter(d => d.rating >= filters.minRating!);
@@ -101,13 +121,13 @@ const DoctorsList: React.FC = () => {
   };
 
   const activeFiltersCount = Object.values(filters).filter(Boolean).length;
-  
+
   return (
     <div className="min-h-screen bg-gray-50">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
         <div className="mb-8">
           <h1 className="text-3xl font-bold text-gray-900 mb-4">Find Doctors</h1>
-          
+
           <div className="flex flex-col lg:flex-row gap-4 mb-6">
             <div className="flex-1 relative">
               <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-5 w-5 text-gray-400" />
@@ -119,18 +139,24 @@ const DoctorsList: React.FC = () => {
                 className="w-full pl-10 pr-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
               />
             </div>
-            
+
             <div className="flex gap-3">
               <button
                 onClick={() => setShowFilters(!showFilters)}
                 className={`flex items-center px-4 py-3 border rounded-lg transition-colors ${
-                  activeFiltersCount > 0 ? 'bg-blue-50 border-blue-300 text-blue-700' : 'bg-white border-gray-300 text-gray-700 hover:bg-gray-50'
+                  activeFiltersCount > 0
+                    ? 'bg-blue-50 border-blue-300 text-blue-700'
+                    : 'bg-white border-gray-300 text-gray-700 hover:bg-gray-50'
                 }`}
               >
                 <Filter className="h-5 w-5 mr-2" />
-                Filters {activeFiltersCount > 0 && <span className="ml-2 bg-blue-600 text-white text-xs px-2 py-1 rounded-full">{activeFiltersCount}</span>}
+                Filters {activeFiltersCount > 0 && (
+                  <span className="ml-2 bg-blue-600 text-white text-xs px-2 py-1 rounded-full">
+                    {activeFiltersCount}
+                  </span>
+                )}
               </button>
-              
+
               <select
                 value={sortBy}
                 onChange={(e) => setSortBy(e.target.value as any)}
@@ -153,17 +179,21 @@ const DoctorsList: React.FC = () => {
                 exit={{ opacity: 0, x: -50 }}
                 className="lg:w-80 mb-8 lg:mb-0"
               >
-                {/* Filter UI can be placed here */}
+                {/* Filter UI */}
               </motion.aside>
             )}
           </AnimatePresence>
 
           <div className="flex-1">
             {isLoading ? (
-              <div className="flex justify-center items-center h-96"><LoadingSpinner size="lg" /></div>
+              <div className="flex justify-center items-center h-96">
+                <LoadingSpinner size="lg" />
+              </div>
             ) : (
               <>
-                <p className="text-gray-600 mb-6">{filteredDoctors.length} doctor{filteredDoctors.length !== 1 ? 's' : ''} found</p>
+                <p className="text-gray-600 mb-6">
+                  {filteredDoctors.length} doctor{filteredDoctors.length !== 1 ? 's' : ''} found
+                </p>
                 <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
                   {filteredDoctors.map((doctor, index) => (
                     <motion.div
@@ -173,29 +203,50 @@ const DoctorsList: React.FC = () => {
                       transition={{ delay: index * 0.05 }}
                       className="bg-white rounded-lg shadow-sm border border-gray-200 hover:shadow-md transition-shadow p-6"
                     >
-                       <div className="flex space-x-4">
-                          <img src={doctor.profileImage} alt={doctor.name} className="w-20 h-20 rounded-full object-cover"/>
-                          <div className="flex-1">
-                            <h3 className="text-lg font-semibold text-gray-900">{doctor.name}</h3>
-                            <p className="text-blue-600 font-medium">{doctor.specialty}</p>
-                            <div className="flex items-center space-x-4 text-sm text-gray-600 mt-2">
-                              <div className="flex items-center space-x-1"><Star className="h-4 w-4 text-yellow-400 fill-current" /><span>{doctor.rating}</span></div>
-                              <div className="flex items-center space-x-1"><Clock className="h-4 w-4" /><span>{doctor.experience} years exp.</span></div>
+                      <div className="flex space-x-4">
+                        <img
+                          src={doctor.profileImage}
+                          alt={doctor.name}
+                          className="w-20 h-20 rounded-full object-cover"
+                        />
+                        <div className="flex-1">
+                          <h3 className="text-lg font-semibold text-gray-900">{doctor.name}</h3>
+                          <p className="text-blue-600 font-medium">{doctor.specialty}</p>
+                          <div className="flex items-center space-x-4 text-sm text-gray-600 mt-2">
+                            <div className="flex items-center space-x-1">
+                              <Star className="h-4 w-4 text-yellow-400 fill-current" />
+                              <span>{doctor.rating}</span>
                             </div>
-                            <div className="flex items-center space-x-1 text-sm text-gray-600 mt-2"><MapPin className="h-4 w-4" /><span>{doctor.clinic.name}, {doctor.clinic.city}</span></div>
-                            <div className="flex items-center justify-between mt-4">
-                              <div className="text-lg font-semibold text-gray-900">₹{doctor.consultationFee}</div>
-                              <Link to={`/doctors/${doctor.id}`} className="bg-blue-600 text-white px-4 py-2 rounded-md hover:bg-blue-700 text-sm font-medium">View Profile</Link>
+                            <div className="flex items-center space-x-1">
+                              <Clock className="h-4 w-4" />
+                              <span>{doctor.experience} years exp.</span>
                             </div>
                           </div>
-                       </div>
+                          <div className="flex items-center space-x-1 text-sm text-gray-600 mt-2">
+                            <MapPin className="h-4 w-4" />
+                            <span>{doctor.clinic.name}, {doctor.clinic.city}</span>
+                          </div>
+                          <div className="flex items-center justify-between mt-4">
+                            <div className="text-lg font-semibold text-gray-900">₹{doctor.consultationFee}</div>
+                            <Link
+                              to={`/doctors/${doctor.id}`}
+                              className="bg-blue-600 text-white px-4 py-2 rounded-md hover:bg-blue-700 text-sm font-medium"
+                            >
+                              View Profile
+                            </Link>
+                          </div>
+                        </div>
+                      </div>
                     </motion.div>
                   ))}
                 </div>
+
                 {filteredDoctors.length === 0 && !isLoading && (
                   <div className="text-center py-16">
                     <Search className="h-16 w-16 mx-auto text-gray-400 mb-4" />
-                    <h3 className="text-lg font-medium text-gray-900">No doctors found for this search.</h3>
+                    <h3 className="text-lg font-medium text-gray-900">
+                      No doctors found for this search.
+                    </h3>
                   </div>
                 )}
               </>

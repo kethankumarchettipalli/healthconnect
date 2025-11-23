@@ -13,7 +13,7 @@ import { auth, db } from '@/firebaseConfig';
 import { doc, setDoc, getDoc } from 'firebase/firestore';
 
 // -----------------------------
-// Type Declarations
+// Types
 // -----------------------------
 type Role = 'patient' | 'doctor' | 'admin';
 
@@ -28,7 +28,7 @@ interface AuthContextType {
   user: CustomUser | null;
   loading: boolean;
   register: (name: string, email: string, password: string, role: Role) => Promise<boolean>;
-  login: (email: string, password: string, role?: Role) => Promise<boolean>;
+  login: (email: string, password: string, role: Role) => Promise<boolean>;
   logout: () => Promise<void>;
 }
 
@@ -46,21 +46,18 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   // -----------------------------
   const register = async (name: string, email: string, password: string, role: Role) => {
     try {
-      // Check if the email already exists
-      const methods = await fetchSignInMethodsForEmail(auth, email);
-      if (methods.length > 0) {
+      const existingMethods = await fetchSignInMethodsForEmail(auth, email);
+      if (existingMethods.length > 0) {
         alert('This email is already registered. Please log in instead.');
         return false;
       }
 
-      // Create new user
       const userCredential = await createUserWithEmailAndPassword(auth, email, password);
       const firebaseUser = userCredential.user;
 
-      // Update display name
       await updateProfile(firebaseUser, { displayName: name });
 
-      // Create user document
+      // Store base user data
       await setDoc(doc(db, 'users', firebaseUser.uid), {
         uid: firebaseUser.uid,
         name,
@@ -69,22 +66,14 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         createdAt: new Date(),
       });
 
-      // Create role-based document
-      if (role === 'patient') {
-        await setDoc(doc(db, 'patients', firebaseUser.uid), {
-          uid: firebaseUser.uid,
-          name,
-          email,
-          createdAt: new Date(),
-        });
-      } else if (role === 'doctor') {
-        await setDoc(doc(db, 'doctors', firebaseUser.uid), {
-          uid: firebaseUser.uid,
-          name,
-          email,
-          createdAt: new Date(),
-        });
-      }
+      // Store role-specific data
+      const roleCollection = role === 'doctor' ? 'doctors' : role === 'patient' ? 'patients' : 'admins';
+      await setDoc(doc(db, roleCollection, firebaseUser.uid), {
+        uid: firebaseUser.uid,
+        name,
+        email,
+        createdAt: new Date(),
+      });
 
       setUser({
         uid: firebaseUser.uid,
@@ -96,57 +85,47 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       return true;
     } catch (error: any) {
       console.error('Registration error:', error);
-      const code = error.code || error.message;
-      if (code.includes('email-already-in-use')) {
-        alert('Email already in use. Please log in instead.');
-      } else {
-        alert('Registration failed: ' + error.message);
-      }
+      alert(`Registration failed: ${error.message}`);
       return false;
     }
   };
 
   // -----------------------------
-  // Login Function (Improved)
+  // Login Function (Fixed)
   // -----------------------------
-  const login = async (email: string, password: string, role?: Role) => {
+  const login = async (email: string, password: string, role: Role) => {
     try {
       const userCredential = await signInWithEmailAndPassword(auth, email, password);
       const firebaseUser = userCredential.user;
 
-      // Determine role from Firestore
-      let fetchedRole: Role = 'patient';
+      // Fetch role from Firestore
       const userDoc = await getDoc(doc(db, 'users', firebaseUser.uid));
-      if (userDoc.exists()) {
-        fetchedRole = userDoc.data().role as Role;
-      } else if (email === 'admin@gmail.com') {
-        fetchedRole = 'admin';
-      } else if (role) {
-        fetchedRole = role;
+      if (!userDoc.exists()) {
+        alert('User record not found.');
+        await signOut(auth);
+        return false;
+      }
+
+      const storedRole = userDoc.data().role as Role;
+
+      // ❌ Prevent logging in with wrong role
+      if (storedRole !== role) {
+        alert(`Access denied. This account is registered as a ${storedRole}.`);
+        await signOut(auth);
+        return false;
       }
 
       setUser({
         uid: firebaseUser.uid,
         email: firebaseUser.email,
         displayName: firebaseUser.displayName,
-        role: fetchedRole,
+        role: storedRole,
       });
 
       return true;
     } catch (error: any) {
       console.error('Login error:', error);
-      const code = error.code || error.message;
-
-      if (code.includes('auth/invalid-credential')) {
-        alert('Invalid email or password.');
-      } else if (code.includes('auth/user-not-found')) {
-        alert('No user found with this email.');
-      } else if (code.includes('auth/wrong-password')) {
-        alert('Incorrect password.');
-      } else {
-        alert('Login failed: ' + error.message);
-      }
-
+      alert(`Login failed: ${error.message}`);
       return false;
     }
   };
@@ -164,19 +143,14 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   };
 
   // -----------------------------
-  // Monitor Auth State Changes
+  // Auth State Listener
   // -----------------------------
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (firebaseUser: FirebaseUser | null) => {
       if (firebaseUser) {
         try {
           const userDoc = await getDoc(doc(db, 'users', firebaseUser.uid));
-          const role = userDoc.exists()
-            ? (userDoc.data().role as Role)
-            : firebaseUser.email === 'admin@gmail.com'
-            ? 'admin'
-            : 'patient';
-
+          const role = userDoc.exists() ? (userDoc.data().role as Role) : 'patient';
           setUser({
             uid: firebaseUser.uid,
             email: firebaseUser.email,
@@ -184,7 +158,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
             role,
           });
         } catch (error) {
-          console.error('Error fetching user role:', error);
+          console.error('Error loading user data:', error);
           setUser(null);
         }
       } else {
@@ -192,7 +166,6 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       }
       setLoading(false);
     });
-
     return () => unsubscribe();
   }, []);
 
@@ -208,8 +181,6 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
 // -----------------------------
 export const useAuth = () => {
   const context = useContext(AuthContext);
-  if (context === undefined) {
-    throw new Error('useAuth must be used within an AuthProvider');
-  }
+  if (!context) throw new Error('useAuth must be used within an AuthProvider');
   return context;
 };

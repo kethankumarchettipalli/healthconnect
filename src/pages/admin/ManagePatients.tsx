@@ -1,18 +1,17 @@
 import React, { useEffect, useState } from "react";
 import { db } from "@/firebaseConfig";
-import { collection, getDocs, deleteDoc, doc, query, where } from "firebase/firestore";
+import { collection, getDocs, deleteDoc, doc } from "firebase/firestore";
 
 const ManagePatients: React.FC = () => {
   const [patients, setPatients] = useState<any[]>([]);
   const [searchTerm, setSearchTerm] = useState("");
 
-  // Fetch all users with role 'patient' from Firestore
+  // Fetch all patients from Firestore
   useEffect(() => {
     const fetchPatients = async () => {
       try {
-        const usersRef = collection(db, "users");
-        const q = query(usersRef, where("role", "==", "patient"));
-        const snapshot = await getDocs(q);
+        const patientsRef = collection(db, "patients"); // ✅ fetch from correct collection
+        const snapshot = await getDocs(patientsRef);
 
         const patientsList = snapshot.docs.map((doc) => ({
           id: doc.id,
@@ -42,7 +41,7 @@ const ManagePatients: React.FC = () => {
 
     if (window.confirm(`Are you sure you want to remove ${patientToRemove.name}?`)) {
       try {
-        await deleteDoc(doc(db, "users", id)); // delete from users collection
+        await deleteDoc(doc(db, "patients", id)); // ✅ delete from patients collection
         setPatients(patients.filter((pat) => pat.id !== id));
       } catch (err) {
         console.error("Error deleting patient:", err);
